@@ -36,14 +36,18 @@ with st.sidebar:
     ref_mode = st.radio("Selection Mode", ["From Bank", "Custom"])
     
     if ref_mode == "From Bank":
-        selected_sentence = st.selectbox("Select a sentence", sentences, index=0)
+        sentence_options = [f"{i+1}. {s}" for i, s in enumerate(sentences)]
+        selected_option = st.selectbox("Select a sentence", sentence_options, index=0)
+        
         if st.button("Shuffle Random Sentence"):
-            st.session_state['random_sentence'] = random.choice(sentences)
+            st.session_state['random_sentence'] = random.choice(sentence_options)
         
         if 'random_sentence' in st.session_state:
             # Override if random was clicked
-            selected_sentence = st.session_state['random_sentence']
-            st.info(f"Randomly selected: {selected_sentence}")
+            selected_option = st.session_state['random_sentence']
+            st.info(f"Randomly selected: {selected_option}")
+            
+        selected_sentence = selected_option.split(". ", 1)[1]
     else:
         selected_sentence = st.text_area("Enter custom reference sentence")
 
@@ -62,59 +66,75 @@ with st.sidebar:
 
 # Main Area - Transcription and Evaluation
 if audio_bytes and selected_sentence:
-    st.header("Evaluation Results")
     
-    st.subheader("Playback Recording")
-    st.audio(audio_bytes, format="audio/wav")
+    # Generate a unique key for the current combination of audio and sentence
+    current_test_key = str(hash(audio_bytes)) + selected_sentence
     
-    with st.spinner("Transcribing..."):
-        # Run STT
-        transcribed_text, latency = stt_engine.transcribe(audio_bytes)
+    colA, colB = st.columns([1, 4])
+    with colA:
+        if st.button("▶️ Run Evaluation", type="primary"):
+            st.session_state['active_test_key'] = current_test_key
+    with colB:
+        if st.session_state.get('active_test_key') == current_test_key:
+            if st.button("❌ Close Results"):
+                st.session_state['active_test_key'] = None
+                st.rerun()
+                
+    # Only show results if the user explicitly ran evaluation for THIS specific sentence and audio
+    if st.session_state.get('active_test_key') == current_test_key:
+        st.header("Evaluation Results")
         
-        # Run Evaluator
-        metrics = Evaluator.evaluate(selected_sentence, transcribed_text)
+        st.subheader("Playback Recording")
+        st.audio(audio_bytes, format="audio/wav")
         
-        # Log to history
-        history_manager.add_run(
-            reference=selected_sentence,
-            transcribed=transcribed_text,
-            wer=metrics['wer'],
-            cer=metrics['cer'],
-            accuracy=metrics['accuracy'],
-            latency=latency
-        )
-        
-    # Display Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Word Accuracy", f"{metrics['accuracy']:.2f}%")
-    col2.metric("WER", f"{metrics['wer']:.2f}%")
-    col3.metric("CER", f"{metrics['cer']:.2f}%")
-    col4.metric("Latency", f"{latency:.2f}s")
-    
-    # Display Alignment
-    st.subheader("Word Alignment Analysis")
-    alignment_html = ""
-    for status, word in metrics['alignment']:
-        if status == 'correct':
-            alignment_html += f"<span style='color: green; margin-right: 5px; padding: 2px; border-radius: 3px;'>{word}</span>"
-        elif status == 'substituted':
-            alignment_html += f"<span style='color: orange; font-weight: bold; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #fff3e0;' title='Substituted'>{word}</span>"
-        elif status == 'extra':
-            alignment_html += f"<span style='color: purple; font-style: italic; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #f3e5f5;' title='Extra word'>{word}</span>"
-        elif status == 'missing':
-            alignment_html += f"<span style='color: red; text-decoration: line-through; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #ffebee;' title='Missing word'>{word}</span>"
+        with st.spinner("Transcribing..."):
+            # Run STT
+            transcribed_text, latency = stt_engine.transcribe(audio_bytes)
             
-    st.markdown(f"<div style='font-size: 18px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;'>{alignment_html}</div>", unsafe_allow_html=True)
-    
-    st.markdown("""
-    **Legend:** 
-    <span style='color: green;'>Correct</span> | 
-    <span style='color: orange;'>Substituted</span> | 
-    <span style='color: purple;'>Extra</span> | 
-    <span style='color: red; text-decoration: line-through;'>Missing</span>
-    """, unsafe_allow_html=True)
-    
-    st.divider()
+            # Run Evaluator
+            metrics = Evaluator.evaluate(selected_sentence, transcribed_text)
+            
+            # Log to history
+            history_manager.add_run(
+                reference=selected_sentence,
+                transcribed=transcribed_text,
+                wer=metrics['wer'],
+                cer=metrics['cer'],
+                accuracy=metrics['accuracy'],
+                latency=latency
+            )
+            
+        # Display Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Word Accuracy", f"{metrics['accuracy']:.2f}%")
+        col2.metric("WER", f"{metrics['wer']:.2f}%")
+        col3.metric("CER", f"{metrics['cer']:.2f}%")
+        col4.metric("Latency", f"{latency:.2f}s")
+        
+        # Display Alignment
+        with st.expander("Word Alignment Analysis", expanded=True):
+            alignment_html = ""
+            for status, word in metrics['alignment']:
+                if status == 'correct':
+                    alignment_html += f"<span style='color: green; margin-right: 5px; padding: 2px; border-radius: 3px;'>{word}</span>"
+                elif status == 'substituted':
+                    alignment_html += f"<span style='color: orange; font-weight: bold; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #fff3e0;' title='Substituted'>{word}</span>"
+                elif status == 'extra':
+                    alignment_html += f"<span style='color: purple; font-style: italic; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #f3e5f5;' title='Extra word'>{word}</span>"
+                elif status == 'missing':
+                    alignment_html += f"<span style='color: red; text-decoration: line-through; margin-right: 5px; padding: 2px; border-radius: 3px; background-color: #ffebee;' title='Missing word'>{word}</span>"
+                    
+            st.markdown(f"<div style='font-size: 18px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;'>{alignment_html}</div>", unsafe_allow_html=True)
+            
+            st.markdown("""
+            **Legend:** 
+            <span style='color: green;'>Correct</span> | 
+            <span style='color: orange;'>Substituted</span> | 
+            <span style='color: purple;'>Extra</span> | 
+            <span style='color: red; text-decoration: line-through;'>Missing</span>
+            """, unsafe_allow_html=True)
+            
+        st.divider()
 
 # History and Analytics
 st.header("Session History & Analytics")
