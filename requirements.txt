@@ -1,0 +1,8 @@
+streamlit
+pocketsphinx
+jiwer
+pandas
+plotly
+soundfile
+librosa
+numpy

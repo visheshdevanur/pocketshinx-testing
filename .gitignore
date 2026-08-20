@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+history.csv
+local_recorder.py
+.streamlit/
